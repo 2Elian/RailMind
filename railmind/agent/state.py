@@ -16,11 +16,14 @@ class AgentState(TypedDict):
     
     # 意图识别
     intent_result: Dict[str, Any]
-    current_intent: Optional[int]  # 当前正在处理哪个子查询
-    current_function: Optional[str]  # 正在调用哪个函数
-    intermediate_results: Optional[Dict[str, Any]]  # 函数执行中间结果
+    sub_queries: List[Dict[str, Any]] 
     
     # ReAct循环
+    current_sub_query_index: int
+    current_sub_query: Dict[str, Any]
+    current_functions: List[str] 
+    current_entities: List[Dict[str, Any]]
+    current_intent: str
     thoughts: List[Dict[str, Any]]  # Thought 记录
     actions: List[Dict[str, Any]]  # Action 记录
     observations: List[Dict[str, Any]]  # Observation 记录
@@ -28,6 +31,7 @@ class AgentState(TypedDict):
     # 执行结果
     executed_functions: List[Dict[str, Any]]
     accumulated_results: List[Dict[str, Any]]
+    results_by_subquery: Dict[int, List[Any]] # 子查询的 独立结果
     
     # 评估
     evaluation_result: Dict[str, Any]

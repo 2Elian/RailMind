@@ -3,7 +3,11 @@ from langchain.tools import tool
 from railmind.function_call import TrainKGQuerySystem
 from typing import List, Dict, Optional
 import json
+from datetime import datetime
+
 from railmind.config import get_settings
+
+# TODO 因为后端都是异步接口 所以工具的话 可能得换成继承BaseTool 然后写同步和异步_run函数
 
 setting = get_settings()
 kg_system = TrainKGQuerySystem(uri=setting.neo4j_uri, user=setting.neo4j_user, password=setting.neo4j_password)
@@ -338,6 +342,93 @@ def search_trains_by_multiple_conditions(
     results = kg_system.run_query(query, parameters)
     return json.dumps(results, ensure_ascii=False, indent=2)
 
+@tool
+def get_current_date(format_type: str = "date") -> str:
+    """获取当前日期和时间
+    
+    Args:
+        format_type: 返回格式类型
+            - "date": 返回日期 (YYYY-MM-DD)
+            - "datetime": 返回日期时间 (YYYY-MM-DD HH:MM:SS)
+            - "time": 返回时间 (HH:MM:SS)
+            - "timestamp": 返回时间戳
+            - "weekday": 返回星期几
+            - "full": 返回完整信息
+    
+    Returns:
+        JSON格式的日期时间信息
+    """
+    now = datetime.now()
+    
+    weekday_map = {
+        0: "星期一",
+        1: "星期二",
+        2: "星期三",
+        3: "星期四",
+        4: "星期五",
+        5: "星期六",
+        6: "星期日"
+    }
+    
+    result = {}
+    
+    if format_type == "date":
+        result = {
+            "date": now.strftime("%Y-%m-%d"),
+            "year": now.year,
+            "month": now.month,
+            "day": now.day
+        }
+    elif format_type == "datetime":
+        result = {
+            "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "date": now.strftime("%Y-%m-%d"),
+            "time": now.strftime("%H:%M:%S")
+        }
+    elif format_type == "time":
+        result = {
+            "time": now.strftime("%H:%M:%S"),
+            "hour": now.hour,
+            "minute": now.minute,
+            "second": now.second
+        }
+    elif format_type == "timestamp":
+        result = {
+            "timestamp": int(now.timestamp()),
+            "datetime": now.strftime("%Y-%m-%d %H:%M:%S")
+        }
+    elif format_type == "weekday":
+        result = {
+            "weekday": weekday_map[now.weekday()],
+            "weekday_number": now.weekday(),
+            "date": now.strftime("%Y-%m-%d")
+        }
+    elif format_type == "full":
+        result = {
+            "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "date": now.strftime("%Y-%m-%d"),
+            "time": now.strftime("%H:%M:%S"),
+            "year": now.year,
+            "month": now.month,
+            "day": now.day,
+            "hour": now.hour,
+            "minute": now.minute,
+            "second": now.second,
+            "weekday": weekday_map[now.weekday()],
+            "weekday_number": now.weekday(),
+            "timestamp": int(now.timestamp())
+        }
+    else:
+        # 默认返回日期
+        result = {
+            "date": now.strftime("%Y-%m-%d"),
+            "year": now.year,
+            "month": now.month,
+            "day": now.day
+        }
+    
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
 TOOLS = [
     search_trains_by_station,
     get_train_details,
@@ -350,5 +441,6 @@ TOOLS = [
     get_ticket_gate_info,
     get_all_stations,
     get_all_trains,
-    search_trains_by_multiple_conditions
+    search_trains_by_multiple_conditions,
+    get_current_date
 ]

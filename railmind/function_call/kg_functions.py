@@ -11,17 +11,6 @@ class TrainKGQuerySystem:
     def __init__(self, uri="bolt://localhost:7687", user="neo4j", password="123456"):
         """初始化Neo4j连接"""
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
-        self._ensure_constraints()
-    
-    def _ensure_constraints(self):
-        """确保数据库约束"""
-        with self.driver.session() as session:
-            # 创建唯一性约束
-            session.run("CREATE CONSTRAINT train_id_unique IF NOT EXISTS FOR (t:Train) REQUIRE t.train_id IS UNIQUE")
-            session.run("CREATE CONSTRAINT station_id_unique IF NOT EXISTS FOR (s:Station) REQUIRE s.station_id IS UNIQUE")
-            session.run("CREATE CONSTRAINT hall_id_unique IF NOT EXISTS FOR (h:WaitingHall) REQUIRE h.hall_id IS UNIQUE")
-            session.run("CREATE CONSTRAINT gate_id_unique IF NOT EXISTS FOR (g:TicketGate) REQUIRE g.gate_id IS UNIQUE")
-            session.run("CREATE CONSTRAINT platform_id_unique IF NOT EXISTS FOR (p:Platform) REQUIRE p.platform_id IS UNIQUE")
     
     def close(self):
         """关闭数据库连接"""
