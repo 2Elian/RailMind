@@ -27790,12 +27790,6 @@
       109
     ],
     "question_type": "type2"
-  },
-  {
-    "id": "b6a0ee30-21a8-42ca-89c0-328febfdce88",
-    "question": "从西安出发、终到站是北京西，且站台是1的列车有哪些？",
-    "answer": [
-      "T232"
-    ],
-    "source_rows": [
+  }
+]
       
