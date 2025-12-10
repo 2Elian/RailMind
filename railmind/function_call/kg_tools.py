@@ -429,6 +429,31 @@ def get_current_date(format_type: str = "date") -> str:
     
     return json.dumps(result, ensure_ascii=False, indent=2)
 
+@tool
+def get_local_cite_information(user_id: str) -> str:
+    """获取用户当前所在城市
+    
+    Args:
+        user_id (str, optional): 用户唯一标识，用于个性化定位
+        
+    Returns:
+        str: 城市名称
+    """
+    return "北京"
+
+@tool
+def get_local_city_station(city_name: str, station_type: Optional[str]) -> List[str]:
+    """获取指定城市的所有火车站信息
+    
+    Args:
+        city_name (str): 城市名称，如"北京"
+        station_type (str, optional): 站点类型过滤，如"高铁站"、"火车站"
+        
+    Returns:
+        Dict: 城市站点列表，包含车站名称
+    """
+    return ["北京", "北京西", "北京南"]
+
 TOOLS = [
     search_trains_by_station,
     get_train_details,

@@ -49,3 +49,4 @@ class AgentState(TypedDict):
     max_iterations: int
     start_time: str
     error: Optional[str]
+    last_error: Optional[str]

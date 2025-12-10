@@ -1,9 +1,6 @@
-from typing import Dict, Any, Callable
+from typing import Dict, Any, List
 from datetime import datetime
 import json
-import functools
-import asyncio
-import time
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
@@ -91,14 +88,14 @@ class ReActAgent(BaseAgent):
         state["start_time"] = datetime.now().isoformat()
         state["should_continue"] = True
         state["error"] = None
-
+        state["last_error"] = None
         if "sub_queries" not in state:
             state["sub_queries"] = []
         state["current_sub_query_index"] = 0
         state["current_sub_query"] = {}
         state["current_functions"] = []
         state["current_entities"] = []
-        state["current_intent"] = ''
+        state["current_intent"] = ""
         
         # load memory context
         state["memory_context"] = self.memory_store.get_session_context(
@@ -194,7 +191,19 @@ class ReActAgent(BaseAgent):
             
             if prev_results:
                 sub_query_context += f"\n\n前面子查询的结果：\n{json.dumps(prev_results, ensure_ascii=False, indent=2)}"
-        
+            # 构建错误上下文 --> 模型给出的参数错误的case
+            error_context = ""
+            if "last_error" in state and state["last_error"]:
+                last_error = state["last_error"]
+                if last_error.get("error") == "missing_required_parameters":
+                    error_context = f"""\n **上次执行失败**:
+                    {last_error.get('message', '')}
+                    缺少参数：{', '.join(last_error.get('required_params', []))}
+                    {last_error.get('hint', '')}
+                    请修正上次的函数调用，补充完整的参数。"""
+                    # 清除错误标记 --> 避免重复提示
+                    state["last_error"] = None
+
             chain = think_prompt | self.llm
             response = await chain.ainvoke({
                 "available_functions": func_info,
@@ -202,7 +211,8 @@ class ReActAgent(BaseAgent):
                 "intent": current_intent,
                 "entities": json.dumps(current_entities, ensure_ascii=False),
                 "executed_functions": exec_func_info,
-                "current_results": results_info
+                "current_results": results_info,
+                "error_context": error_context
             })
             is_think = is_think_model(self.llm.model_name)
             # 解析思考结果
@@ -260,6 +270,18 @@ class ReActAgent(BaseAgent):
     async def _execute_action(self, state: AgentState) -> AgentState:
         # TODO 1. 高并发场景下 如何确保数据同步安全？
         # TODO 2. 如何保证多站点问题的模糊和确定性呢？ 比如用户模糊的查询是北京 那如何检索到 北京西、北京、北京南等站点呢？ 再比如用户精确查询 北京站 --> 但是数据库里面只有北京、北京西，怎么办呢？
+        """
+        TODO2 的真实badcase案例：
+        案例1：
+            Query：从北京西到西安的车次有哪些？
+            召回func：find_trains_between_stations
+            参数：{'departure_station': '北京西站', 'arrival_station': '西安站'}
+
+            实际上应该是 北京西 西安，不能有站
+        案例2：
+            Query：从北京到西安的车次有哪些？
+            实际上，我们数据库里面只有北京西，你搜北京、北京站 一定搜不到结果
+        """
         try:
             if not state["actions"]:
                 state["error"] = "没有可执行的 Action"
@@ -268,10 +290,18 @@ class ReActAgent(BaseAgent):
             current_action = state["actions"][-1]["action"]
             func_name = current_action.get("function_name")
             params = current_action.get("parameters", {})
-            print(f"函数：{func_name},\n 函数参数：{params}")
             result = await self._call_function(func_name, params, state)
-            print("函数执行结果")
-            print(result)
+            # 埋点: 收集badcase
+            if not result:
+                bad_case_data = {
+                    "func_name": func_name,
+                    "params": params,
+                    "state_snapshot": {
+                        "query": state.get("original_query"),
+                        "iteration": state.get("iteration_count")
+                    }
+                }
+                self.write_backtrack(error_msg="Func Call执行返回结果为空", data=bad_case_data)
             # 记录 Observation
             observation = {
                 "iteration": state["iteration_count"],
@@ -288,8 +318,18 @@ class ReActAgent(BaseAgent):
                 "parameters": params,
                 "result_summary": observation["result_summary"]
             })
-            if result:
-                state["accumulated_results"].extend(result if isinstance(result, list) else [result])
+            is_param_error = isinstance(result, dict) and result.get("error") == "missing_required_parameters"
+            is_end_of_turn = func_name == "end_of_turn"
+            if result and not is_param_error and not is_end_of_turn:
+                if not (isinstance(result, dict) and "error" in result):
+                    state["accumulated_results"].extend(result if isinstance(result, list) else [result])
+            if is_end_of_turn:
+                self.logger.info("当前子查询完成")
+                state["should_continue"] = False
+            # 如果是参数缺失错误，记录到 state 以便 rethink
+            if is_param_error:
+                state["last_error"] = result
+                self.logger.warning(f"参数缺失: {result.get('message')}")
             
         except Exception as e:
             state["error"] = f"执行 Action 失败: {str(e)}"
@@ -298,11 +338,15 @@ class ReActAgent(BaseAgent):
                 "timestamp": datetime.now().isoformat(),
                 "error": str(e)
             })
-            self.write_backtrack(error_msg=e, data=state)
+            self.write_backtrack(error_msg=f"执行 Action 失败: {str(e)}", data={
+                    "error_type": type(e).__name__,
+                    "func_name": current_action.get("function_name") if 'current_action' in locals() else "unknown",
+                    "iteration": state.get("iteration_count", 0)
+                })
         return state
     
     @log_execution_time("Evaluate Result")
-    def _evaluate_result(self, state: AgentState) -> AgentState:
+    async def _evaluate_result(self, state: AgentState) -> AgentState:
         # TODO: 如果是数据本身原因/我们系统100%无法解决的问题 该如何做出判断呢？比如：用户查询北京西到西安早上8点前的列车，但是我们数据库里面早上8点前的时间数据 都是nan 这样就会导致数据库cypher查询结果为空 loop=True无线循环
         try:
             state["iteration_count"] += 1
@@ -345,12 +389,11 @@ class ReActAgent(BaseAgent):
                 
                 if current_sq:
                     # 评估当前子查询是否完成
-                    sq_eval_result = self.result_evaluator.evaluate(
+                    sq_eval_result = await self.result_evaluator.evaluate(
                         current_sq["sub_query"],
                         state["executed_functions"],
                         current_sq.get("results", [])
                     )
-                    
                     # 如果当前子查询完成，切换到下一个
                     if not sq_eval_result.get("should_continue", True):
                         self.logger.info(f"子查询 {current_idx + 1} 完成")
@@ -399,7 +442,7 @@ class ReActAgent(BaseAgent):
         return state
     
     @log_execution_time("Generate Answer")
-    def _generate_answer(self, state: AgentState) -> AgentState:
+    async def _generate_answer(self, state: AgentState) -> AgentState:
         try:
             answer_prompt = ChatPromptTemplate.from_messages([
                 ("system", FIN_SYSTEM_PROMPT),
@@ -421,7 +464,7 @@ class ReActAgent(BaseAgent):
             process_str = "\n\n".join(process_steps)
             
             chain = answer_prompt | self.llm
-            response = chain.invoke({
+            response = await chain.ainvoke({
                 "query": state["original_query"],
                 "results": results_str,
                 "process": process_str
@@ -474,21 +517,45 @@ class ReActAgent(BaseAgent):
     
     async def _call_function(self, func_name: str, params: Dict[str, Any], state: AgentState) -> Any:
         """调用func call"""
-        # TODO 有必要嘛？直接抛出错误不就好了？
-        if not params and state["entities"]:
-            for entity in state["entities"]:
-                if entity["type"] == "Station" and func_name in ["search_entity", "get_entity_relations", "get_neighbors"]:
-                    params["entity_name"] = entity["value"]
-                    break
-        if func_name in self.tools:
-            tool = self.tools[func_name]
-            try:
-                result_str = await tool.ainvoke(params)
-                return json.loads(result_str)
-            except Exception as e:
-                return {"error": f"函数执行失败: {str(e)}"}
-        else:
-            return {"error": f"未知函数: {func_name}"}
+        if func_name == "end_of_turn":
+            self.logger.info("模型认为任务已完成，无需调用更多函数")
+            return {"message": "任务完成"}
+        
+        if func_name not in self.tools:
+            self.write_backtrack(error_msg="未知函数名称", data={"error": f"未知函数: {func_name}"})
+            raise ValueError
+        
+        tool = self.tools[func_name]
+        required_params = self._get_required_params(tool)
+        if not params:
+            if not required_params:
+                try:
+                    result_str = await tool.ainvoke({})
+                    return json.loads(result_str)
+                except Exception as e:
+                    return {"error": f"函数执行失败: {str(e)}"}
+            if not self._validate_required_params(params, required_params):
+                missing_params = [p for p in required_params if p not in params]
+                # TODO 返回ReThink 告知模型 你缺少了参数
+                self.write_backtrack(error_msg="missing_required_parameters", data=f"函数 {func_name} 所需要的参数为: {required_params}, 缺少必须参数: {', '.join(missing_params)}")
+                return {
+                    "error": "missing_required_parameters",
+                    "message": f"函数 {func_name} 缺少必须参数: {', '.join(missing_params)}",
+                    "required_params": required_params,
+                    "hint": "请在下一次 Thought 中明确指定这些参数"
+                }
+        
+        try:
+            result_str = await tool.ainvoke(params)
+            return json.loads(result_str)
+        except Exception as e:
+            error_msg = f"函数执行失败: {str(e)}"
+            self.write_backtrack(error_msg=error_msg, data={
+                    "func_name": func_name,
+                    "params": params,
+                    "error_type": type(e).__name__
+                })
+            return {"error": error_msg}
     
     def _summarize_result(self, result: Any) -> str:
         """总结函数执行结果"""
@@ -500,6 +567,28 @@ class ReActAgent(BaseAgent):
             return f"返回字典，包含 {len(result)} 个字段"
         else:
             return str(result)[:100]
+        
+    def _get_required_params(self, tool) -> List[str]:
+        """获取函数的必须参数列表"""
+        required = []
+        try:
+            if hasattr(tool, 'args') and hasattr(tool.args, '__annotations__'):
+                import inspect
+                sig = inspect.signature(tool.func)
+                for param_name, param in sig.parameters.items():
+                    # 如果没有默认值，则为必须参数
+                    if param.default == inspect.Parameter.empty and param_name != 'self':
+                        required.append(param_name)
+        except Exception:
+            pass
+        return required
+    
+    def _validate_required_params(self, params: Dict[str, Any], required_params: List[str]) -> bool:
+        """验证是否提供了所有必须参数"""
+        for param in required_params:
+            if param not in params or params[param] is None:
+                return False
+        return True
     
     async def run(self, query: str, user_id: str, session_id: str) -> Dict[str, Any]:
         initial_state: AgentState = {
@@ -530,7 +619,8 @@ class ReActAgent(BaseAgent):
             "iteration_count": 0,
             "max_iterations": 10,
             "start_time": "",
-            "error": None
+            "error": None,
+            "last_error": None
         }
         final_state = await self.graph.ainvoke(initial_state)
         

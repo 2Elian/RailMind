@@ -48,14 +48,14 @@ def log_execution_time(
                 result = await func(*args, **kwargs)
                 return result
             finally:
-                elapsed = time.perf_counter() - start_time
-                log.info(f"{RED}[{display_name}] End --> Time: {elapsed:.4f}s{RESET}")
                 if log_state:
                     state = kwargs.get("state", None)
                     if state is None and len(args) >= 2:
                         state = args[1]
 
                     log.info(f"{YELLOW}[{display_name}] Current State:\n{state}{RESET}")
+                elapsed = time.perf_counter() - start_time
+                log.info(f"{RED}[{display_name}] End --> Time: {elapsed:.4f}s{RESET}")
 
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
@@ -66,15 +66,14 @@ def log_execution_time(
             try:
                 return func(*args, **kwargs)
             finally:
-                elapsed = time.perf_counter() - start_time
-                log.info(f"{RED}[{display_name}] End --> Time: {elapsed:.4f}s{RESET}")
-
                 if log_state:
                     state = kwargs.get("state", None)
                     if state is None and len(args) >= 2:
                         state = args[1]
 
                     log.info(f"{YELLOW}[{display_name}] Current State:\n{state}{RESET}")
+                elapsed = time.perf_counter() - start_time
+                log.info(f"{RED}[{display_name}] End --> Time: {elapsed:.4f}s{RESET}")
 
         return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 

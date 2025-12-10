@@ -1,9 +1,11 @@
+import json
 from typing import Dict, Any, List
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai.chat_models.base import BaseChatOpenAI
 
 from railmind.operators.templates.eval_result import SYSTEM_PROMPT, USER_PROMPT
+from railmind.utils import is_think_model, parse_think_content
 
 
 class ResultEvaluator:
@@ -27,7 +29,7 @@ class ResultEvaluator:
         
         # 格式化结果
         results_info = "\n".join([
-            f"- {i+1}. {str(r)[:200]}..."
+            f"- {i+1}. {str(r)}..."
             for i, r in enumerate(current_results)
         ])
         
@@ -37,11 +39,14 @@ class ResultEvaluator:
             "executed_functions": func_info,
             "current_results": results_info
         })
+        is_think = is_think_model(self.llm.model_name)
         try:
-            import json
-            result = json.loads(response.content)
+            if is_think:
+                _, res_context = parse_think_content(response.content)
+                result = json.loads(res_context)
+            else:
+                result = json.loads(response.content)
         except:
-            # 默认评估结果
             result = {
                 "completeness": {
                     "score": 0.5,
