@@ -319,12 +319,13 @@ class ReActAgent(BaseAgent):
                 "result_summary": observation["result_summary"]
             })
             is_param_error = isinstance(result, dict) and result.get("error") == "missing_required_parameters"
-            is_end_of_turn = func_name == "end_of_turn"
-            if result and not is_param_error and not is_end_of_turn:
+            end_signals = ["end_of_turn", "end_task", "finish", "complete", "none", "null", "None"]
+            is_end_signal = func_name in end_signals or not func_name
+            if result and not is_param_error and not is_end_signal:
                 if not (isinstance(result, dict) and "error" in result):
                     state["accumulated_results"].extend(result if isinstance(result, list) else [result])
-            if is_end_of_turn:
-                self.logger.info("当前子查询完成")
+            if is_end_signal:
+                self.logger.info(f"模型调用 {func_name}，当前子查询完成")
                 state["should_continue"] = False
             # 如果是参数缺失错误，记录到 state 以便 rethink
             if is_param_error:
@@ -517,8 +518,9 @@ class ReActAgent(BaseAgent):
     
     async def _call_function(self, func_name: str, params: Dict[str, Any], state: AgentState) -> Any:
         """调用func call"""
-        if func_name == "end_of_turn":
-            self.logger.info("模型认为任务已完成，无需调用更多函数")
+        end_signals = ["end_of_turn", "end_task", "finish", "complete", "none", "null", "None"]
+        if func_name in end_signals or not func_name:
+            self.logger.info(f"模型调用 {func_name or 'empty'}，任务已完成")
             return {"message": "任务完成"}
         
         if func_name not in self.tools:
