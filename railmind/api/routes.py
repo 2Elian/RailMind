@@ -93,7 +93,7 @@ async def query_stream(query: str, user_id: str, session_id: str = None):
             memory_store = get_memory_store()
             if current_session_id not in memory_store.session_metadata:
                 memory_store.create_session(current_session_id, user_id)
-            result = agent.run(
+            result = await agent.run(
                 query=query,
                 user_id=user_id,
                 session_id=current_session_id
@@ -135,6 +135,9 @@ async def query_stream(query: str, user_id: str, session_id: str = None):
             yield f"data: {json.dumps(response.dict(), ensure_ascii=False)}\n\n"
             
         except Exception as e:
+            print(f"流式查询错误: {str(e)}")
+            import traceback
+            traceback.print_exc()
             error_msg = {"error": str(e)}
             yield f"event: error\n"
             yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"

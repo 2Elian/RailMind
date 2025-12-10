@@ -7,6 +7,8 @@ RailMind是一个基于LangChain构建的ReAct铁路运输场景下的问答系�
 
 # Framework
 
+![web演示](resource/images/web.png)
+
 ```mermaid
 sequenceDiagram
     participant User
