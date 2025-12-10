@@ -1,7 +1,11 @@
+import asyncio
+import json
 from fastapi import APIRouter, HTTPException
 from datetime import datetime
 import uuid
 import traceback
+
+from fastapi.responses import StreamingResponse
 
 from railmind.api.schemas import QueryRequest, QueryResponse, SessionRequest, SessionResponse
 from railmind.agent.react_agent import ReActAgent
@@ -80,6 +84,70 @@ async def query(request: QueryRequest):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"处理查询失败: {str(e)}")
 
+@router.get("/query_stream")
+async def query_stream(query: str, user_id: str, session_id: str = None):
+    """流式接口 --> 实时返回 ReAct 流程"""
+    async def event_generator():
+        try:
+            current_session_id = session_id or f"session_{uuid.uuid4().hex[:16]}"
+            memory_store = get_memory_store()
+            if current_session_id not in memory_store.session_metadata:
+                memory_store.create_session(current_session_id, user_id)
+            result = agent.run(
+                query=query,
+                user_id=user_id,
+                session_id=current_session_id
+            )
+            
+            for i, thought in enumerate(result.get("thoughts", [])):
+                yield f"event: thought\n"
+                yield f"data: {json.dumps(thought, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.1)
+            
+            for i, action in enumerate(result.get("actions", [])):
+                yield f"event: action\n"
+                yield f"data: {json.dumps(action, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.1)
+            
+            for i, observation in enumerate(result.get("observations", [])):
+                yield f"event: observation\n"
+                yield f"data: {json.dumps(observation, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.1)
+
+            response = QueryResponse(
+                success=result.get("error") is None,
+                answer=result.get("final_answer", "无法生成答案"),
+                metadata={
+                    "session_id": current_session_id,
+                    "user_id": user_id,
+                    "iterations": result.get("iteration_count", 0),
+                    "functions_used": len(result.get("executed_functions", [])),
+                    "timestamp": datetime.now().isoformat(),
+                    "error": result.get("error")
+                },
+                thoughts=result.get("thoughts", []),
+                actions=result.get("actions", []),
+                observations=result.get("observations", []),
+                full_state=result
+            )
+            
+            yield f"event: complete\n"
+            yield f"data: {json.dumps(response.dict(), ensure_ascii=False)}\n\n"
+            
+        except Exception as e:
+            error_msg = {"error": str(e)}
+            yield f"event: error\n"
+            yield f"data: {json.dumps(error_msg, ensure_ascii=False)}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 @router.get("/session/{session_id}/history")
 async def get_session_history(session_id: str):

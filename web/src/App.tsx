@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { api, QueryResponse } from './api';
+import React, { useState, useRef } from 'react';
+import { api, QueryResponse, Thought, Action, Observation } from './api';
 import { ReActTimeline } from './components/ReActTimeline';
+import ReactMarkdown from 'react-markdown';
 
 function App() {
   const [query, setQuery] = useState('');
@@ -9,6 +10,67 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<QueryResponse | null>(null);
   const [activeTab, setActiveTab] = useState<'timeline' | 'raw'>('timeline');
+  const [useStreaming, setUseStreaming] = useState(true); // 默认启用流式
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  // 实时流式数据
+  const [streamThoughts, setStreamThoughts] = useState<Thought[]>([]);
+  const [streamActions, setStreamActions] = useState<Action[]>([]);
+  const [streamObservations, setStreamObservations] = useState<Observation[]>([]);
+
+  // 渲染答案内容，支持 <think> 标签和 Markdown
+  const renderAnswer = (answer: string) => {
+    // 提取 <think> 标签内容
+    const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = thinkRegex.exec(answer)) !== null) {
+      // 添加 <think> 之前的内容
+      if (match.index > lastIndex) {
+        const beforeThink = answer.substring(lastIndex, match.index);
+        parts.push(
+          <ReactMarkdown key={`md-${lastIndex}`} className="prose prose-invert max-w-none">
+            {beforeThink}
+          </ReactMarkdown>
+        );
+      }
+
+      // 添加 <think> 内容
+      parts.push(
+        <div key={`think-${match.index}`} className="my-4 bg-yellow-900/20 border border-yellow-800/50 rounded-xl p-4">
+          <div className="flex items-center space-x-2 mb-2">
+            <svg className="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            <span className="text-sm font-semibold text-yellow-600">思考过程</span>
+          </div>
+          <ReactMarkdown className="prose prose-invert prose-sm max-w-none text-yellow-200/90">
+            {match[1]}
+          </ReactMarkdown>
+        </div>
+      );
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // 添加剩余内容
+    if (lastIndex < answer.length) {
+      const remaining = answer.substring(lastIndex);
+      parts.push(
+        <ReactMarkdown key={`md-${lastIndex}`} className="prose prose-invert max-w-none">
+          {remaining}
+        </ReactMarkdown>
+      );
+    }
+
+    return parts.length > 0 ? <div>{parts}</div> : (
+      <ReactMarkdown className="prose prose-invert max-w-none">
+        {answer}
+      </ReactMarkdown>
+    );
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -17,8 +79,16 @@ function App() {
       return;
     }
 
+    // 关闭之前的连接
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
     setLoading(true);
     setResponse(null);
+    setStreamThoughts([]);
+    setStreamActions([]);
+    setStreamObservations([]);
 
     try {
       let currentSessionId = sessionId;
@@ -28,24 +98,56 @@ function App() {
         setSessionId(currentSessionId);
       }
 
-      const result = await api.query({
+      const request = {
         query,
         user_id: userId,
         session_id: currentSessionId || undefined,
-      });
+      };
 
-      setResponse(result);
+      if (useStreaming) {
+        // 使用流式查询
+        eventSourceRef.current = api.queryStream(
+          request,
+          (thought) => {
+            setStreamThoughts(prev => [...prev, thought]);
+          },
+          (action) => {
+            setStreamActions(prev => [...prev, action]);
+          },
+          (observation) => {
+            setStreamObservations(prev => [...prev, observation]);
+          },
+          (finalResponse) => {
+            setResponse(finalResponse);
+            setLoading(false);
+          },
+          (error) => {
+            console.error('流式查询失败:', error);
+            setLoading(false);
+          }
+        );
+      } else {
+        // 使用传统查询
+        const result = await api.query(request);
+        setResponse(result);
+        setLoading(false);
+      }
     } catch (error: any) {
       console.error('查询失败:', error);
-    } finally {
       setLoading(false);
     }
   };
 
   const handleNewSession = () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
     setSessionId(null);
     setResponse(null);
     setQuery('');
+    setStreamThoughts([]);
+    setStreamActions([]);
+    setStreamObservations([]);
   };
 
   return (
@@ -61,8 +163,8 @@ function App() {
                 </svg>
               </div>
               <div>
-                <h1 className="text-xl font-bold text-white">ReAct KG Agent</h1>
-                <p className="text-xs text-gray-500">基于 LangGraph + Neo4j 的智能问答系统</p>
+                <h1 className="text-xl font-bold text-white">RailMind-Agent</h1>
+                <p className="text-xs text-gray-500">AI旅行向导：更智能的行程规划，更自在的体验。</p>
               </div>
             </div>
             
@@ -71,6 +173,17 @@ function App() {
                 <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
                 <span className="text-xs text-gray-400 font-medium">Online</span>
               </div>
+              <button
+                onClick={() => setUseStreaming(!useStreaming)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-full transition-all ${
+                  useStreaming
+                    ? 'bg-green-900/30 text-green-400 border border-green-800'
+                    : 'bg-gray-800 text-gray-500 border border-gray-700'
+                }`}
+                title="切换查询模式"
+              >
+                {useStreaming ? '✨ 流式模式' : '⏱️ 普通模式'}
+              </button>
               {sessionId && (
                 <div className="text-xs text-gray-500">
                   Session: <span className="text-gray-400 font-mono">{sessionId.substring(0, 8)}...</span>
@@ -82,10 +195,10 @@ function App() {
       </header>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="mx-auto px-6 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* Left Panel - Input & Answer */}
-          <div className="space-y-6">
+          <div className="lg:col-span-2 space-y-6">
             {/* Query Input Card */}
             <div className="bg-zinc-900 border border-gray-800 rounded-xl p-6 shadow-2xl">
               <div className="flex items-center space-x-2 mb-4">
@@ -161,9 +274,9 @@ function App() {
                 </div>
                 
                 <div className="bg-zinc-800 border border-gray-700 rounded-xl p-5">
-                  <p className="text-gray-200 leading-relaxed whitespace-pre-wrap">
-                    {response.answer}
-                  </p>
+                  <div className="text-gray-200 leading-relaxed">
+                    {renderAnswer(response.answer)}
+                  </div>
                 </div>
 
                 {response.metadata.error && (
@@ -184,7 +297,7 @@ function App() {
           </div>
 
           {/* Right Panel - ReAct Process */}
-          <div className="bg-zinc-900 border border-gray-800 rounded-xl shadow-2xl">
+          <div className="lg:col-span-3 bg-zinc-900 border border-gray-800 rounded-xl shadow-2xl">
             <div className="p-6 border-b border-gray-800">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
@@ -217,18 +330,22 @@ function App() {
               </div>
             </div>
             
-            <div className="p-6 max-h-[calc(100vh-300px)] overflow-y-auto custom-scrollbar">
-              {response ? (
+            <div className="p-6 h-[calc(100vh-250px)] overflow-y-auto custom-scrollbar">
+              {(response || streamThoughts.length > 0) ? (
                 <>
                   {activeTab === 'timeline' ? (
                     <ReActTimeline
-                      thoughts={response.thoughts}
-                      actions={response.actions}
-                      observations={response.observations}
+                      thoughts={useStreaming && !response ? streamThoughts : (response?.thoughts || [])}
+                      actions={useStreaming && !response ? streamActions : (response?.actions || [])}
+                      observations={useStreaming && !response ? streamObservations : (response?.observations || [])}
                     />
                   ) : (
                     <pre className="text-xs text-gray-400 bg-black p-4 rounded-xl overflow-auto border border-gray-800">
-                      {JSON.stringify(response.full_state, null, 2)}
+                      {JSON.stringify(response?.full_state || {
+                        thoughts: streamThoughts,
+                        actions: streamActions,
+                        observations: streamObservations
+                      }, null, 2)}
                     </pre>
                   )}
                 </>

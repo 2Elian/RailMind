@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #0a0a0a;
+  min-height: 100vh;
+}
+
+code {
+  font-family: 'Fira Code', source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Markdown Prose Styles */
+.prose {
+  @apply text-gray-200;
+}
+
+.prose p {
+  @apply mb-4 leading-relaxed;
+}
+
+.prose strong {
+  @apply text-white font-semibold;
+}
+
+.prose em {
+  @apply text-gray-300 italic;
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+  @apply text-white font-bold mb-3 mt-6;
+}
+
+.prose h1 { @apply text-2xl; }
+.prose h2 { @apply text-xl; }
+.prose h3 { @apply text-lg; }
+
+.prose ul, .prose ol {
+  @apply ml-6 mb-4 space-y-2;
+}
+
+.prose ul {
+  @apply list-disc;
+}
+
+.prose ol {
+  @apply list-decimal;
+}
+
+.prose li {
+  @apply text-gray-300;
+}
+
+.prose code {
+  @apply bg-zinc-800 text-yellow-400 px-1.5 py-0.5 rounded text-sm font-mono;
+}
+
+.prose pre {
+  @apply bg-zinc-900 border border-gray-800 rounded-lg p-4 overflow-x-auto mb-4;
+}
+
+.prose pre code {
+  @apply bg-transparent text-gray-300 p-0;
+}
+
+.prose blockquote {
+  @apply border-l-4 border-gray-700 pl-4 italic text-gray-400 my-4;
+}
+
+.prose a {
+  @apply text-blue-400 hover:text-blue-300 underline;
+}
+
+.prose table {
+  @apply w-full border-collapse mb-4;
+}
+
+.prose th {
+  @apply bg-zinc-800 border border-gray-700 px-4 py-2 text-left font-semibold text-white;
+}
+
+.prose td {
+  @apply border border-gray-800 px-4 py-2 text-gray-300;
+}
+
+.prose hr {
+  @apply border-gray-800 my-6;
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(100, 100, 100, 0.4);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 120, 120, 0.6);
+}
+
+/* Animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(80, 80, 80, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(100, 100, 100, 0.5);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
