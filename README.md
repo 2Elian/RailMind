@@ -1,9 +1,14 @@
 # RailMind
 
-RailMind是一个基于LangChain构建的ReAct铁路运输场景下的问答系统
+RailMind的愿景是打造一款：个人出行、旅行度假的全链路智能助手，为出行做全方位的规划。
 
 后续优化：Agent-RL训练、多智能体协作、更强大的记忆系统、与多数据库交互、抗并发等前沿Agent方法
 
+# RailMind的核心功能特性
+
+- 🤖 **全方位的出行规划**: 基于用户个人历史偏好、本地与出发地的数据信息，从购票、住店、饮食和游玩进行全方位的规划。
+- 🔄 **强大的记忆系统**: 用户长短期对话记忆+用户行为记忆+客户端记忆+历史数据记忆 强大的记忆载入功能
+- 🎨 **MCP一体化服务**: 不仅制定出行规划，还能xxxx。
 
 # Framework
 
@@ -126,6 +131,16 @@ graph TD
 ### 2.3 ReThink模块
 
 
+1. 参数名称规范与模糊查询问题
+
+    比如：车站名称、城市名称、列车车次等必须使用中文 --> 北京西=北京西站，但是北京西站 在数据库是搜不出来的！ --> 比如用户输入的是北京，那么北京站、北京西站、北京南站应该都返回结果
+
+2. 当任务完成的时候 返回的 func call 名称不在tools里面
+    
+    这种情况，我们在提示词里面做限制
+
+
+
 ### 2.4 Func Call 执行模块
 
 
@@ -136,3 +151,25 @@ graph TD
 
 
 ### 2.7 前端可视化
+
+
+### 2.8 其他零碎问题
+
+1. 简单查询 过度循环问题
+
+    query明明很简单，只需要调用一个func call就能解决的问题，系统会不断的循环，使得达到递归限制，导致该会话回答失败。增加了无用的多轮循环的时间。
+
+    ```bash
+    example:
+    问题: K4547/6次列车的始发站是哪里？
+    预期答案: 成都西
+    ❌ 失败 | 错误: 达到递归限制，系统强制停止: Recursion limit of 30 reached without hitting a stop condition. You can increase the limit by setting the `recursion_limit` config key.
+    For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+    ```
+
+## 3. bug解决记录
+
+### 3.1 'result': {'message': '任务完成'}, 'result_summary': '返回字典，包含 1 个字段' 不断重复问题
+
+### 3.2 日志回调摸排bug
+
