@@ -75,7 +75,7 @@ class ReActAgent(BaseAgent):
         
         workflow.add_edge("generate_answer", END)
         
-        return workflow.compile()
+        return workflow.compile(debug=False)
     
     async def _init_state(self, state: AgentState) -> AgentState:
         state["thoughts"] = []
@@ -352,11 +352,20 @@ class ReActAgent(BaseAgent):
         try:
             state["iteration_count"] += 1
             if state["iteration_count"] >= state["max_iterations"]:
+                self.logger.warning(f"达到最大迭代次数 {state['max_iterations']}，强制停止")
+                self.write_backtrack(error_msg=f"达到最大迭代次数 {state['max_iterations']}，强制停止",
+                                     data=state)
                 state["should_continue"] = False
                 state["evaluation_result"] = {
                     "should_continue": False,
                     "reason": "达到最大迭代次数"
                 }
+                return state
+            if state.get("error"):
+                self.logger.warning(f"检测到错误，停止执行: {state['error']}")
+                self.write_backtrack(error_msg=f"检测到错误，停止执行: {state['error']}",
+                                     data=state)
+                state["should_continue"] = False
                 return state
             
             """
@@ -624,7 +633,18 @@ class ReActAgent(BaseAgent):
             "error": None,
             "last_error": None
         }
-        final_state = await self.graph.ainvoke(initial_state)
+        # LangGraph默认递归限制是 25
+        try:
+            final_state = await self.graph.ainvoke(
+                initial_state,
+                config={"recursion_limit": 30} # TODO 在配置文件里面写吧
+            )
+        except RecursionError as e:
+            self.logger.error(f"递归限制错误: {str(e)}")
+            return {
+                **initial_state,
+                "error": f"达到递归限制，系统强制停止: {str(e)}",
+                "final_answer": "抱歉，系统处理超时。请简化您的问题后重试。"
+            }
         
         return final_state
-    
