@@ -1,4 +1,8 @@
-# RailMind
+<div align="center"> 
+
+# RailMind- 你的出行包在我身上
+
+</div>
 
 RailMind的愿景是打造一款：个人出行、旅行度假的全链路智能助手，为出行做全方位的规划。
 
