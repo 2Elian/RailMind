@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     # memory
     long_memory_num: int = 100
     shot_memory_num: int = 20
+
+    sub_query_max_iterations: int = 10
     
     class Config:
         env_file = ".env"

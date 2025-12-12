@@ -10,9 +10,6 @@ FIN_SYSTEM_PROMPT : str = """你是一个专业的答案生成助手。根据查
 
 FIN_USER_PROMPT : str = """用户查询：{query}
 
-收集到的信息：
-{results}
-
 执行过程：
 {process}
 

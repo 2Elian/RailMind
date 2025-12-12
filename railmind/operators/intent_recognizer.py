@@ -41,7 +41,7 @@ class IntentRecognizer:
         
         return result
     
-    def get_function_schemas(self, function_names: List[str]) -> List[Dict[str, Any]]:
+    async def get_function_schemas(self, function_names: List[str]) -> List[Dict[str, Any]]:
         """获取函数的详细schema
         Args:
             function_names: 函数名列表
