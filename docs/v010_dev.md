@@ -150,9 +150,9 @@
 
 ## 3. bug解决记录
 
-### 3.1 当触发'result': {'message': '任务完成'} 或者是end信号的时候的处理逻辑有bug
+### 3.1 当分解2个子query的时候，如果子query1调用的func call 子query2也要调用会产生如下bug
 
-    详见xxx
-
-### 3.2 日志回调摸排bug
-
+```bash
+'thoughts': [{'iteration': 0, 'timestamp': '2025-12-13T14:19:50.808242', 'sub_query_index': 1, 'sub_query': 'K4547/6次列车的候车厅位置是什么？', 'content': {'thought': '用户询问K4547/6次列车的候车厅位置，已调用get_train_details获取列车详情但返回空结果。当前没有其他可用函数，无法进一步获取候车厅信息。', 'reasoning': '根据系统工具限制，只有get_train_details函数可用，但该函数未返回候车厅位置信息。现有数据无法满足用户需求，且无法通过其他途径获取补充信息。', 'next_action': {'function_name': 'end_of_turn', 'parameters': {}, 'reason': '已尝试获取列车详细信息但未获得候车厅位置数据，系统无其他可用功能补充信息'}, 'expected_outcome': '向用户说明无法获取该列车的候车厅位置信息'}}],
+```
+这个bug是因为在_update_current_sub_query函数中，清理evaluation_result写成了清理exe_info，导致的错误。已在66d57fa处理。
