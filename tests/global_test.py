@@ -1,4 +1,4 @@
 a = []
 b = [1]
-if b:
+if not a:
     print(a)  

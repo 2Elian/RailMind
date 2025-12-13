@@ -49,3 +49,64 @@ class ErrorType(str, Enum):
     EXE = "ExecuteActionFailed"
     ER = "EvalResultFailed"
     GA = "GenerateAnswerFailed"
+
+class StateBuilder:
+
+    @staticmethod
+    def init_state(state: AgentState, agent_instance) -> AgentState:
+        state["thoughts"] = []
+        state["actions"] = []
+        state["observations"] = []
+        state["executed_functions"] = []
+        state["accumulated_results"] = []
+        state["iteration_count"] = 0
+        state["should_continue"] = False
+        state["func_end"] = False
+        state["error"] = None
+        state["sub_queries"] = []
+        state["rewritten_query"] = ""
+        state["current_sub_query_index"] = 0
+        state["current_sub_query"] = {}
+        state["current_functions"] = []
+        state["current_entities"] = []
+        state["current_intent"] = ""
+        state["current_result"] = []
+        state["_previous_sub_query_index"] = -1
+        state["total_iteration_count"] = 0
+        state["param_error"] = None
+
+        # load memory context
+        state["memory_context"] = agent_instance.memory_store.get_session_context(
+            state["session_id"]
+        )
+        return state
+
+    @staticmethod
+    def update_current_sub_query(state: AgentState) -> AgentState:
+        if not state["sub_queries"]:
+            return
+        current_idx = state["current_sub_query_index"]
+        previous_idx = state.get("_previous_sub_query_index", -1)
+        if current_idx != previous_idx:
+            state["current_sub_query"] = []
+            state["current_entities"] = []
+            state["current_functions"] = []
+            state["current_intent"] = []
+            state["current_result"] = []
+            state["thoughts"] = []
+            state["actions"] = []
+            state["observations"] = []
+            state["iteration_count"] = 0
+            state["executed_functions"] = []
+            state["_previous_sub_query_index"] = current_idx
+            state["evaluation_result"] = []
+            
+        if current_idx < len(state["sub_queries"]):
+            state["current_sub_query"] = state["sub_queries"][current_idx]["sub_query"]
+            state["current_entities"] = state["sub_queries"][current_idx]["entities"]
+            state["current_functions"] = [
+                f["function_name"] for f in state["sub_queries"][current_idx]["relevant_functions"]
+            ]
+            state["current_intent"] = state["sub_queries"][current_idx]["type"] + ": " + state["sub_queries"][current_idx]["description"]
+            state["current_result"] = []
+        return state

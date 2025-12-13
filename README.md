@@ -83,13 +83,25 @@ sequenceDiagram
 
 完善现有模块，核心模块Query重写、Query意图识别、ReAct、Eval、Generate、Agent-Momory模块。终极目标是能够依据用户出行安排，购买车票。响应时长控制在3s以内。
 
+v0.1.1Query重写与意图识别模块优化
+
+v0.1.2ReAct优化
+
+v0.1.3Eval优化
+
+v0.1.4Generate逻辑优化
+
+v0.1.5记忆模块优化
+
+v0.1.6代码可读性+速度优化
+
 ## v0.2系列
 
-在铁路票务系统的基础能力(Agent-Memory等核心模块)之上，进一步拓展酒店业务
+在铁路票务系统的基础能力(Agent-Memory等核心模块)之上，进一步拓展酒店业务（RAG业务+Embedding模型微调召回+NL2SQL能力）
 
 ## v0.3系列
 
-拓展景点推荐业务
+拓展景点推荐业务+景点拍照教程业务
 
 ## v0.4系列
 

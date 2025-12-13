@@ -150,9 +150,41 @@
 
 ## 3. bug解决记录
 
-### 3.1 当分解2个子query的时候，如果子query1调用的func call 子query2也要调用会产生如下bug
+### 1. 当分解2个子query的时候，如果子query1调用的func call 子query2也要调用会产生如下bug
 
 ```bash
 'thoughts': [{'iteration': 0, 'timestamp': '2025-12-13T14:19:50.808242', 'sub_query_index': 1, 'sub_query': 'K4547/6次列车的候车厅位置是什么？', 'content': {'thought': '用户询问K4547/6次列车的候车厅位置，已调用get_train_details获取列车详情但返回空结果。当前没有其他可用函数，无法进一步获取候车厅信息。', 'reasoning': '根据系统工具限制，只有get_train_details函数可用，但该函数未返回候车厅位置信息。现有数据无法满足用户需求，且无法通过其他途径获取补充信息。', 'next_action': {'function_name': 'end_of_turn', 'parameters': {}, 'reason': '已尝试获取列车详细信息但未获得候车厅位置数据，系统无其他可用功能补充信息'}, 'expected_outcome': '向用户说明无法获取该列车的候车厅位置信息'}}],
 ```
 这个bug是因为在_update_current_sub_query函数中，清理evaluation_result写成了清理exe_info，导致的错误。已在66d57fa处理。
+
+## 2. 检票口编号类型的问题，会直接返回end_of_turn
+
+这是因为没检票口的func，
+
+## 2. 当有多个子query，且第一个子query第一次调用func的时候 就遇到了end_of_turn 会触发如下代码
+
+```python
+    if is_end_signal:
+        current_idx = state["current_sub_query_index"]
+        state["current_sub_query_index"] += 1
+        self.logger.info(f"the model calls {func_name}, and the current subquery is complete.")
+        # determine if there are any unprocessed subqueries.
+        if state["current_sub_query_index"] >= len(state["sub_queries"]):
+            state["func_end"] = True
+        else:
+            state["sub_queries"][current_idx]["exe_process_data"] = {
+                "iteration_count": state["iteration_count"],
+                "all_result": state["current_result"], 
+                "thoughts": state["thoughts"],
+                "actions": state["actions"],
+                "observations": state["observations"],
+                "exec_func_info": state["executed_functions"]
+            }
+```
+else分支中，此时state["sub_queries"][current_idx]["result"] = state["current_result"][-1]是有问题的。因为current_result是空的
+
+原因：当前query在预定义的tools中没有找到合适的func调用 会给一个end_of_turn：
+
+解决方法1：将当前query与缓存的query进行召回 从召回的Q-A对儿中找答案 # TODO
+
+解决方法2：如果召回分数<0.5，那么就给一个固定答案，记录badcase # TODO

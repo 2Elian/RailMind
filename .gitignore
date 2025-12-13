@@ -33,3 +33,6 @@ frontend/.turbo/
 # Logs
 *.log
 logs/
+
+# data
+data/qa.json

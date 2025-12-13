@@ -5,7 +5,8 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
 
-from railmind.agent.state import AgentState
+from railmind.agent.state import AgentState, StateBuilder
+from railmind.agent.workflow_define import RailMindWorkFlowBuilder
 from railmind.operators.query_rewriter import QueryRewriter
 from railmind.operators.intent_recognizer import IntentRecognizer
 from railmind.operators.result_evaluator import ResultEvaluator
@@ -42,110 +43,11 @@ class ReActAgent(BaseAgent):
         return get_logger(name=name)
     
     def _build_graph(self) -> StateGraph:
-        """build LangGraph workflow"""
-        workflow = StateGraph(AgentState)
-        
-        # add node
-        workflow.add_node("init", self._init_state)
-        workflow.add_node("rewrite_query", self._rewrite_query)
-        workflow.add_node("recognize_intent", self._recognize_intent)
-        workflow.add_node("react_think", self._react_think)
-        workflow.add_node("execute_action", self._execute_action)
-        workflow.add_node("evaluate_result", self._evaluate_result)
-        workflow.add_node("generate_answer", self._generate_answer)
-        
-        # set a start
-        workflow.set_entry_point("init")
-        
-        # add edge
-        workflow.add_edge("init", "rewrite_query")
-        workflow.add_edge("rewrite_query", "recognize_intent")
-        workflow.add_edge("recognize_intent", "react_think")
-        workflow.add_edge("react_think", "execute_action")
-        workflow.add_edge("execute_action", "evaluate_result")
-        
-        # Conditional edge, determining whether to continue the loop.
-        workflow.add_conditional_edges(
-            "evaluate_result",
-            self._should_continue,
-            {
-                "continue": "react_think",
-                "finish": "generate_answer",
-            }
-        )
-        workflow.add_conditional_edges(
-            "execute_action",
-            self._check_func_continue,
-            {
-                "continue": "evaluate_result",
-                "finish": "generate_answer",
-            }
-        )
-        # error conditional edge
-        workflow.add_conditional_edges(
-            "rewrite_query",
-            self._check_error_or_continue,
-            {
-                "error": "generate_answer",
-                "continue": "recognize_intent"
-            }
-        )
-        workflow.add_conditional_edges(
-            "recognize_intent",
-            self._check_error_or_continue,
-            {
-                "error": "generate_answer",
-                "continue": "react_think"
-            }
-        )
-        workflow.add_conditional_edges(
-            "react_think",
-            self._check_error_or_continue,
-            {
-                "error": "generate_answer",
-                "continue": "execute_action"
-            }
-        )
-        workflow.add_conditional_edges(
-            "execute_action",
-            self._check_error_or_continue,
-            {
-                "error": "generate_answer",
-                "continue": "evaluate_result"
-            }
-        )
-        workflow.add_edge("generate_answer", END)
-        
-        return workflow.compile(debug=False)
-    
-    async def _init_state(self, state: AgentState) -> AgentState:
-        state["thoughts"] = []
-        state["actions"] = []
-        state["observations"] = []
-        state["executed_functions"] = []
-        state["accumulated_results"] = []
-        state["iteration_count"] = 0
-        state["should_continue"] = False
-        state["func_end"] = False
-        state["error"] = None
-        state["sub_queries"] = []
-        state["rewritten_query"] = ""
-        state["current_sub_query_index"] = 0
-        state["current_sub_query"] = {}
-        state["current_functions"] = []
-        state["current_entities"] = []
-        state["current_intent"] = ""
-        state["current_result"] = []
-        state["_previous_sub_query_index"] = -1
-        state["total_iteration_count"] = 0
-        state["param_error"] = None
+        return RailMindWorkFlowBuilder.create_workflow(self)
 
-        # load memory context
-        state["memory_context"] = self.memory_store.get_session_context(
-            state["session_id"]
-        )
+    async def _init_state(self, state: AgentState) -> AgentState:
+        state = StateBuilder.init_state(state=state, agent_instance=self)
         return state
-    
     
     @log_execution_time("Rewrite Query")
     async def _rewrite_query(self, state: AgentState) -> AgentState:
@@ -310,14 +212,19 @@ class ReActAgent(BaseAgent):
             Query：从北京到西安的车次有哪些？
             实际上，我们数据库里面只有北京西，你搜北京、北京站 一定搜不到结果
         """
+        if not state["actions"]:
+            state["error"] = "No executable Action"
+            return state
+        
+        current_action = state["actions"][-1]["action"]
+        func_name = current_action.get("function_name")
+        params = current_action.get("parameters", {})
+
+        end_signals = {"end_of_turn"}
+        is_end_signal = not func_name or func_name in end_signals
+        if is_end_signal:
+            return await self._handle_end_signal(state, func_name)
         try:
-            if not state["actions"]:
-                state["error"] = "No executable Action"
-                return state
-            
-            current_action = state["actions"][-1]["action"]
-            func_name = current_action.get("function_name")
-            params = current_action.get("parameters", {})
             result = await self._call_function(func_name, params, state)
             if not result:
                 bad_case_data = {
@@ -346,29 +253,8 @@ class ReActAgent(BaseAgent):
                 "result_summary": observation["result_summary"]
             })
             is_param_error = isinstance(result, dict) and result.get("error") == "missing_required_parameters"
-            end_signals = ["end_of_turn", "end_task", "finish", "complete", "none", "null", "None"]
-            is_end_signal = func_name in end_signals or not func_name
-            if result and not is_param_error and not is_end_signal:
+            if result and not is_param_error:
                 state["current_result"].extend(result if isinstance(result, list) else [result])
-
-            if is_end_signal:
-                current_idx = state["current_sub_query_index"]
-                self.logger.info(f"the model calls {func_name}, and the current subquery is complete.")
-                if state["current_sub_query_index"] >= len(state["sub_queries"]):
-                    state["func_end"] = True
-                else:
-                    state["sub_queries"][current_idx]["exe_process_data"] = {
-                        "iteration_count": state["iteration_count"],
-                        "all_result": state["current_result"], 
-                        "thoughts": state["thoughts"],
-                        "actions": state["actions"],
-                        "observations": state["observations"],
-                        "exec_func_info": state["executed_functions"]
-                    }
-                    state["sub_queries"][current_idx]["result"] = state["current_result"][-1]
-                    state["current_sub_query_index"]+=1
-                    state["should_continue"] = True   
-                return state  
 
             # TODO 这里应该直接回ReThink模块 优先级不高 后面再改
             if is_param_error:
@@ -384,6 +270,7 @@ class ReActAgent(BaseAgent):
     async def _evaluate_result(self, state: AgentState) -> AgentState:
         if state["should_continue"]:
             return state
+
         current_idx = state["current_sub_query_index"]
         current_sq = state["sub_queries"][current_idx] if current_idx < len(state["sub_queries"]) else None
         try:
@@ -489,6 +376,7 @@ class ReActAgent(BaseAgent):
                     "results_count": results_count
                 }
                 return state
+            # TODO func_end 的处理 要判断是否有结果 如果有结果 就下面llm处理，如果没结果就返回一个固定值
             
             answer_prompt = ChatPromptTemplate.from_messages([
                 ("system", FIN_SYSTEM_PROMPT),
@@ -536,60 +424,11 @@ class ReActAgent(BaseAgent):
         return state
     
     async def _update_current_sub_query(self, state: AgentState) -> None:
-        # TODO 更新到下一个子查询的时候 需要情况当前的current_sub_query/current_entities/current_functions/current_intent/current_result/思考/行动/观测/iteration_count/exec_func_info
-        if not state["sub_queries"]:
-            return
-        current_idx = state["current_sub_query_index"]
-        previous_idx = state.get("_previous_sub_query_index", -1)
-        if current_idx != previous_idx:
-            state["current_sub_query"] = []
-            state["current_entities"] = []
-            state["current_functions"] = []
-            state["current_intent"] = []
-            state["current_result"] = []
-            state["thoughts"] = []
-            state["actions"] = []
-            state["observations"] = []
-            state["iteration_count"] = 0
-            state["executed_functions"] = []
-            state["_previous_sub_query_index"] = current_idx
-            state["evaluation_result"] = []
-            
-        if current_idx < len(state["sub_queries"]):
-            state["current_sub_query"] = state["sub_queries"][current_idx]["sub_query"]
-            state["current_entities"] = state["sub_queries"][current_idx]["entities"]
-            state["current_functions"] = [
-                f["function_name"] for f in state["sub_queries"][current_idx]["relevant_functions"]
-            ]
-            state["current_intent"] = state["sub_queries"][current_idx]["type"] + ": " + state["sub_queries"][current_idx]["description"]
-            state["current_result"] = []
-
-    def _should_continue(self, state: AgentState) -> str:
-        if state.get("error"):
-            return "finish"
-        if not state.get("should_continue", False):
-            return "finish"
-        return "continue"
-    
-    def _check_func_continue(self, state: AgentState) -> str:
-        if state.get("func_end"):
-            return "finish"
-        return "continue"
-    
-    def _check_error_or_continue(self, state: AgentState) -> str:
-        if state.get("error"):
-            return "error"
-        return "continue"
+        updated_state = StateBuilder.update_current_sub_query(state)
     
     async def _call_function(self, func_name: str, params: Dict[str, Any], state: AgentState) -> Any:
-        """调用func call"""
-        end_signals = ["end_of_turn", "end_task", "finish", "complete", "none", "null", "None"]
-        if func_name in end_signals or not func_name:
-            self.logger.info(f"模型调用 {func_name or 'empty'}，任务已完成")
-            return {"message": "任务完成"}
-        
         if func_name not in self.tools:
-            await self.write_backtrack(error_msg="未知函数名称", data={"error": f"未知函数: {func_name}"})
+            await self.write_backtrack(error_type=ErrorType.EXE, error_msg="未知函数名称", data={"error": f"模型得到了一个未知函数: {func_name}"})
             raise ValueError
         
         tool = self.tools[func_name]
@@ -624,6 +463,32 @@ class ReActAgent(BaseAgent):
                 })
             return {"error": error_msg}
     
+    async def _handle_end_signal(self, state: AgentState, func_name: str) -> AgentState:
+        self.logger.info(f"Model calls {func_name}, current subquery complete.")
+        current_idx = state["current_sub_query_index"]
+        state["current_sub_query_index"] += 1
+        # normal termination
+        if state["current_result"]:
+            state["sub_queries"][current_idx]["result"] = state["current_result"][-1]
+        # When `func calls` does not have a corresponding function for the current query to use.
+        else:
+            # TODO @Elian 特殊处理 记忆召回/返回空值记录badcase 在v0.1.5中处理
+            state["sub_queries"][current_idx]["result"] = ""
+        state["sub_queries"][current_idx]["exe_process_data"] = {
+            "iteration_count": state["iteration_count"],
+            "all_result": state["current_result"],
+            "thoughts": state["thoughts"],
+            "actions": state["actions"],
+            "observations": state["observations"] if state["current_result"] else ["todo"], # TODO 观察的话也在v0.1.5中处理
+            "exec_func_info": state["executed_functions"]
+        }
+        if state["current_sub_query_index"] >= len(state["sub_queries"]):
+            state["func_end"] = True
+        else:
+            state["should_continue"] = True
+        
+        return state
+    
     def _summarize_result(self, result: Any) -> str:
         if not result:
             return "无结果"
@@ -652,7 +517,8 @@ class ReActAgent(BaseAgent):
             if param not in params or params[param] is None:
                 return False
         return True
-    
+
+
     def _common_error_data(self, state: AgentState) -> Dict[Any, Any]:
         return {
                 "origin_query": state["original_query"],
@@ -666,6 +532,30 @@ class ReActAgent(BaseAgent):
                     "observations": state["observations"]
                 }
                 }
+    
+    def _should_continue(self, state: AgentState) -> str:
+        if state.get("error"):
+            return "finish"
+        if not state.get("should_continue", False):
+            return "finish"
+        return "continue"
+    
+    def _check_func_continue(self, state: AgentState) -> str:
+        if state.get("func_end"):
+            return "finish"
+        return "continue"
+    
+    def _check_error_or_continue(self, state: AgentState) -> str:
+        if state.get("error"):
+            return "error"
+        return "continue"
+
+    def _check_error_or_continue_for_exe(self, state: AgentState) -> str:
+        if state.get("error"):
+            return "error_to_answer"
+        if state.get("func_end"):
+            return "finish"
+        return "continue"  
     
     async def run(self, query: str, user_id: str, session_id: str) -> Dict[str, Any]:
         # external variables
