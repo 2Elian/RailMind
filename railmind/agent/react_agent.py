@@ -363,7 +363,7 @@ class ReActAgent(BaseAgent):
                         "thoughts": state["thoughts"],
                         "actions": state["actions"],
                         "observations": state["observations"],
-                        "exec_func_info": state["exec_func_info"]
+                        "exec_func_info": state["executed_functions"]
                     }
                     state["sub_queries"][current_idx]["result"] = state["current_result"][-1]
                     state["current_sub_query_index"]+=1
@@ -551,7 +551,7 @@ class ReActAgent(BaseAgent):
             state["actions"] = []
             state["observations"] = []
             state["iteration_count"] = 0
-            state["exec_func_info"] = []
+            state["executed_functions"] = []
             state["_previous_sub_query_index"] = current_idx
             state["evaluation_result"] = []
             
